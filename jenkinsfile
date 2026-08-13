@@ -1,0 +1,154 @@
+pipeline {
+
+    agent any 
+
+    tools {
+
+        maven 'Maven 3.9.9'
+
+        jdk 'jdk 21'
+    }
+
+    environment {
+
+        ECR_REGISTRY = '883999921903.dkr.ecr.ap-southeast-1.amazonaws.com'
+        ECR_REPO = 'new-pipeline'
+        IMAGE_TAG = "v1.${BUILD_NUMBER}"
+    }
+
+    stages {
+
+        stage ('Checkout') {
+
+            steps {
+
+                checkout scm
+            }
+        }
+        stage ('Unit Test') {
+
+            steps {
+
+                sh 'mvn test'
+            }
+        }
+
+        stage ('Integration Test') {
+
+            steps {
+
+                sh 'mvn verify -DskipTests -B'
+            }
+        }
+
+        stage ('build') {
+
+            steps {
+
+                sh 'mvn clean install'
+            }
+        }
+
+        stage ('Docker image') {
+
+            steps {
+
+                sh '''
+
+                docker build -t $ECR_REPO:$IMAGE_TAG .
+                docker tag ${ECR_REPO}:$IMAGE_TAG ${ECR_REGISTRY}/${ECR_REPO}:$IMAGE_TAG
+                docker tag ${ECR_REPO}:$IMAGE_TAG ${ECR_REGISTRY}/${ECR_REPO}:latest
+            
+            '''
+
+            }
+        }
+
+        stage('OWASP Dependency-Check') {
+          
+          steps {
+            catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+            dependencyCheck(
+                additionalArguments: """
+                    --scan ${WORKSPACE}
+                    --format HTML
+                    --format XML
+                    --out ${WORKSPACE}/owasp-report
+                    --disableNodeAudit
+                    --disableRetireJS
+                    --noupdate
+                    --nvdApiDelay 0
+                    --nvdMaxRetryCount 5
+                """,
+                odcInstallation: 'OWASP-DC'
+                )
+            }
+               dependencyCheckPublisher(
+                pattern: '**/dependency-check-report.xml'
+        )
+                }
+        }
+
+        
+        stage('Trivy Image Scan') {
+            steps {
+              catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+                sh """
+                    trivy image \
+                      --exit-code 1 \
+                      --severity CRITICAL \
+                      --no-progress \
+                      ${ECR_REPO}:${IMAGE_TAG}
+                """
+              }
+            } 
+        }
+
+        stage ('Docker push') {
+
+            steps {
+
+                script {
+                     
+                    withCredentials([aws(accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: 'aws-creds', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                     
+                     sh '''
+
+                    aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin $ECR_REGISTRY
+                     docker push ${ECR_REGISTRY}/${ECR_REPO}:$IMAGE_TAG   
+                     docker push ${ECR_REGISTRY}/${ECR_REPO}:latest
+                     
+                     '''
+                    }
+
+                }
+            }
+        }
+
+        stage ('Deploy'){
+            steps {
+
+                script {
+                 
+                 withCredentials([aws(accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: 'aws-creds', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                  
+                  sh '''
+
+                  aws eks update-kubeconfig --region ap-southeast-1 --name my-cluster
+                  envsubst < deployment.yaml | kubectl apply -f -
+                  kubectl apply -f service.yaml
+                  
+                 '''
+                    }
+                }
+            }
+        }
+    }
+        post {
+
+          always {
+            sh 'docker image prune -f '
+            cleanWs()
+            }
+        }
+}
