@@ -75,7 +75,6 @@ pipeline {
                     --format XML
                     --out ${WORKSPACE}/owasp-report
                     --disableNodeAudit
-                    --disableRetireJS
                     --noupdate
                     --nvdApiDelay 0
                     --nvdMaxRetryCount 5
@@ -98,6 +97,7 @@ pipeline {
                       --exit-code 1 \
                       --severity CRITICAL \
                       --no-progress \
+                      ----timeout 10m \
                       ${ECR_REPO}:${IMAGE_TAG}
                 """
               }
