@@ -65,26 +65,25 @@ pipeline {
         }
 
         stage('OWASP Dependency-Check') {
-          steps {
-              catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+           steps {
+               catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+                 
                  withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                 dependencyCheck(
-                    additionalArguments: """
-                        --scan ${WORKSPACE}
-                        --format HTML
-                        --format XML
-                        --out ${WORKSPACE}/owasp-report
-                        --disableNodeAudit
-                        --nvdApiKey ${NVD_API_KEY}
-                        --nvdApiDelay 0
-                        --nvdMaxRetryCount 5
-                    """,
-                    odcInstallation: 'OWASP-DC'
-                    )
+                    dependencyCheck(
+                      additionalArguments: '--scan ' + WORKSPACE +
+                        ' --format HTML' +
+                        ' --format XML' +
+                        ' --out ' + WORKSPACE + '/owasp-report' +
+                        ' --disableNodeAudit' +
+                        ' --nvdApiKey ' + NVD_API_KEY +
+                        ' --nvdApiDelay 6000' +
+                        ' --nvdMaxRetryCount 10',
+                      odcInstallation: 'OWASP-DC'
+                       )
+                    }
                 }
-            }
-                dependencyCheckPublisher(
-                pattern: '**/dependency-check-report.xml'
+                 dependencyCheckPublisher(
+                 pattern: '**/dependency-check-report.xml'
                 )
             }
         }
