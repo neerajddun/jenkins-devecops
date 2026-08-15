@@ -14,6 +14,7 @@ pipeline {
         ECR_REGISTRY = '883999921903.dkr.ecr.ap-southeast-1.amazonaws.com'
         ECR_REPO = 'pipeline-dev'
         IMAGE_TAG = "v1.${BUILD_NUMBER}"
+        TRIVY_CACHE_DIR = '/var/jenkins_home/trivy-cache'
     }
 
     stages {
@@ -64,33 +65,64 @@ pipeline {
             }
         }
 
-        stage('OWASP Dependency-Check') {
+       stage('OWASP Dependency-Check') {
+          steps {
+            sh 'mkdir -p ${WORKSPACE}/owasp-report'
 
-        steps {
-
-          sh 'mkdir -p ${WORKSPACE}/owasp-report'
-
-          catchError(
-             buildResult: 'SUCCESS',
-             stageResult: 'UNSTABLE'
-            )   
-            
-            {
-
+             withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+             catchError(
+                buildResult: 'SUCCESS',
+                stageResult: 'UNSTABLE'
+                )      {
                 dependencyCheck(
-                  odcInstallation: 'OWASP-DC',
-                  additionalArguments:
-                    '--scan ' + WORKSPACE +
-                    ' --format HTML' +
-                    ' --format XML' +
-                    ' --out ' + WORKSPACE + '/owasp-report' +
-                    ' --disableNodeAudit'
-                )   
+                    odcInstallation: 'OWASP-DC',
+                    additionalArguments:
+                        '--scan ' + WORKSPACE +
+                        ' --format HTML' +
+                        ' --format XML' +
+                        ' --out ' + WORKSPACE + '/owasp-report' +
+                        ' --disableNodeAudit' +
+                        ' --nvdApiKey ' + env.NVD_API_KEY
+                    )
+                }
             }
 
-              dependencyCheckPublisher(
-                pattern: 'owasp-report/dependency-check-report.xml'
-              )
+               dependencyCheckPublisher(
+                 pattern: 'owasp-report/dependency-check-report.xml'
+               )
+            }
+        }
+
+
+        stage('Trivy Image Scan') {
+           steps {
+              catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+                 sh """
+                    trivy image \
+                      --exit-code 1 \
+                      --severity CRITICAL \
+                      --no-progress \
+                      ${ECR_REPO}:${IMAGE_TAG}
+                 """
+              }
+           }
+
+        post {
+            always {
+                sh """
+                    trivy image \
+                      --exit-code 0 \
+                      --severity HIGH,CRITICAL \
+                      --format json \
+                      --output trivy-report.json \
+                      ${ECR_REPO}:${IMAGE_TAG}
+                """
+
+                  archiveArtifacts(
+                      artifacts: 'trivy-report.json',
+                      fingerprint: true
+                  )
+                }
             }
         }
 
