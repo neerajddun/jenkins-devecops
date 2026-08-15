@@ -65,24 +65,35 @@ pipeline {
         }
 
         stage('OWASP Dependency-Check') {
-            steps {
-              catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-              dependencyCheck(
-                additionalArguments: '--scan ' + WORKSPACE +
+
+        steps {
+
+          sh 'mkdir -p ${WORKSPACE}/owasp-report'
+
+          catchError(
+             buildResult: 'SUCCESS',
+             stageResult: 'UNSTABLE'
+            )   
+            
+            {
+
+                dependencyCheck(
+                  odcInstallation: 'OWASP-DC',
+                  additionalArguments:
+                    '--scan ' + WORKSPACE +
                     ' --format HTML' +
                     ' --format XML' +
                     ' --out ' + WORKSPACE + '/owasp-report' +
-                    ' --disableNodeAudit' +
-                    ' --noupdate',
-                odcInstallation: 'OWASP-DC'
-                )
+                    ' --disableNodeAudit'
+                )   
             }
-               dependencyCheckPublisher(
-               pattern: '**/dependency-check-report.xml'
-               )
-            }   
-        }
 
+              dependencyCheckPublisher(
+                pattern: 'owasp-report/dependency-check-report.xml'
+              )
+            }
+        }
+        
         stage ('Docker push') {
 
             steps {
